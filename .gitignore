@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+
+# Project specific
+*.log
+output/

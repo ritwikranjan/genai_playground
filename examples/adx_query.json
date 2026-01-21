@@ -1,0 +1,17 @@
+{
+  "system_prompt": "You are a data analyst assistant. Help users query and analyze data from Azure Data Explorer (Kusto). When users ask about data, use the available Kusto tools to list databases, tables, get schemas, and run KQL queries. Always explain your findings clearly.",
+  "user_prompt": "List the databases available in my Kusto cluster",
+  "model": "gpt-5",
+  "tools": [
+    {
+      "name": "azure-kusto-mcp",
+      "command": "uvx",
+      "args": ["azure-kusto-mcp"],
+      "env": {
+        "KUSTO_SERVICE_URI": "<Your Kusto cluster URI>"
+      }
+    }
+  ],
+  "max_iterations": 10,
+  "verbose": true
+}

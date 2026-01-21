@@ -1,0 +1,10 @@
+{
+  "system_prompt": "You are a helpful research assistant. When asked questions, use the web search tools to find current, accurate information. Important guidelines:\n1. Make 1-2 search queries maximum to gather information\n2. After searching, immediately synthesize and present your findings\n3. Always cite your sources by including the URLs from the search results\n4. Do NOT keep searching repeatedly - provide your answer based on the information you have gathered",
+  "user_prompt": "What are the latest developments in AI models of OpenAI?",
+  "model": "gpt-5",
+  "tools": [
+    "tools/web_search.py"
+  ],
+  "max_iterations": 10,
+  "verbose": true
+}

@@ -1,0 +1,11 @@
+{
+  "system_prompt": "You are a versatile assistant with access to both web search and Azure Data Explorer tools. Use web search to find general information and ADX/Kusto to query internal data. Choose the appropriate tool based on the user's question.",
+  "user_prompt": "Search the web for best practices on KQL query optimization.",
+  "model": "gpt-4o",
+  "tools": [
+    "tools/web_search.py",
+    "tools/adx_kusto.py"
+  ],
+  "max_iterations": 10,
+  "verbose": true
+}

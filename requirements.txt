@@ -1,0 +1,22 @@
+# Azure OpenAI SDK
+openai>=1.14.0
+
+# MCP SDK for Python
+mcp>=1.0.0
+
+# CLI framework
+typer[all]>=0.9.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Azure Data Explorer (Kusto) SDK
+azure-kusto-data>=4.3.0
+azure-identity>=1.15.0
+
+# Web search (no API key required)
+duckduckgo-search>=4.1.0
+
+# Async support
+anyio>=4.0.0
+httpx>=0.25.0
