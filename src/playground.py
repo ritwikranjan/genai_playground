@@ -31,9 +31,27 @@ app = typer.Typer(
 console = Console()
 
 def load_config_from_json(json_path: str) -> dict:
-    """Load configuration from a JSON file."""
+    """Load configuration from a JSON file.
+    
+    Supports loading system_prompt from an external file via:
+    - "system_prompt_file": path to a text/markdown file (relative to config file)
+    """
+    config_dir = Path(json_path).parent
+    
     with open(json_path, "r") as f:
-        return json.load(f)
+        config = json.load(f)
+    
+    # Support loading system_prompt from external file
+    if "system_prompt_file" in config:
+        prompt_file = config_dir / config["system_prompt_file"]
+        if prompt_file.exists():
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                config["system_prompt"] = f.read()
+        else:
+            raise FileNotFoundError(f"System prompt file not found: {prompt_file}")
+        del config["system_prompt_file"]
+    
+    return config
 
 @app.command()
 def run(

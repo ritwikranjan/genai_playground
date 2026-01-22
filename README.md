@@ -7,6 +7,8 @@ A Python CLI for experimenting with AI models and MCP (Model Context Protocol) t
 - **Azure OpenAI Integration**: Uses the Azure OpenAI SDK for model inference
 - **MCP Tool Support**: Connect multiple MCP tool servers for extended capabilities
 - **Flexible Configuration**: Use JSON config files or command-line arguments
+- **Streaming Responses**: See AI responses appear token-by-token in real-time
+- **Reasoning Display**: View the model's thinking process (for reasoning models like o1, o3, gpt-5)
 - **Built-in Tools**:
   - **Web Search**: Search the web using DuckDuckGo (no API key required)
   - **Azure Data Explorer**: Query Kusto databases with KQL
@@ -149,9 +151,44 @@ python src/playground.py init-config -o my_config.json
   ],
   "max_iterations": 10,
   "verbose": true,
+  "stream": true,
+  "show_reasoning": true,
+  "reasoning_effort": null,
   "azure_endpoint": "https://your-resource.openai.azure.com/",
   "azure_deployment": "gpt-4o"
 }
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+
+| `system_prompt` | string | "You are a helpful assistant." | The system prompt for the conversation |
+| `user_prompt` | string | "" | The initial user prompt (for single-shot mode) |
+| `model` | string | "gpt-4o" | The model name |
+| `tools` | array | [] | List of MCP tool configurations |
+| `max_iterations` | int | 10 | Maximum tool call iterations |
+| `verbose` | bool | false | Enable verbose output |
+| `stream` | bool | true | Enable streaming responses |
+| `show_reasoning` | bool | true | Display reasoning content from reasoning models |
+| `reasoning_effort` | string | null | Reasoning effort level: `"low"`, `"medium"`, or `"high"` |
+| `azure_endpoint` | string | - | Azure OpenAI endpoint URL (overrides env) |
+| `azure_deployment` | string | - | Deployment name (overrides env) |
+
+## Streaming & Reasoning
+
+### Streaming Responses
+
+By default, chat mode streams responses token-by-token in real-time, giving you immediate feedback as the AI generates its response.
+
+When streaming is enabled, you'll see a status line when chat starts:
+
+```text
+[Streaming enabled, reasoning display on]
+Type 'exit' or 'quit' to end, 'clear' to reset conversation.
+
+You: What is the capital of France?
 ```
 
 ## Tools
@@ -311,6 +348,7 @@ You can use any MCP server published to PyPI:
 
 | Approach | When to Use | Example |
 |----------|-------------|---------|
+
 | **Built-in tools** | Quick start, common use cases | `tools/web_search.py` |
 | **Custom MCP server** | Internal APIs, proprietary data, custom logic | `tools/adx_kusto.py` |
 | **Pre-built via uvx** | Community tools, standard integrations | `uvx azure-kusto-mcp` |

@@ -33,6 +33,11 @@ class PlaygroundConfig:
     max_iterations: int = 10
     verbose: bool = False
     
+    # Streaming and reasoning options
+    stream: bool = True  # Enable streaming responses
+    show_reasoning: bool = True  # Show reasoning content when available
+    reasoning_effort: Optional[str] = None  # "low", "medium", or "high" for reasoning models
+    
     # Azure OpenAI settings (can be overridden)
     azure_endpoint: Optional[str] = None
     azure_api_key: Optional[str] = None
@@ -240,17 +245,202 @@ async def call_tool(server: ToolServer, tool_name: str, arguments: dict) -> str:
         return f"Tool error: {str(e)}"
 
 
+async def run_conversation_streaming(
+    openai_client: AzureOpenAI,
+    messages: list[dict],
+    tool_to_server: dict[str, ToolServer],
+    all_tools: list[dict],
+    deployment: str,
+    max_iterations: int,
+    verbose: bool = False,
+    show_reasoning: bool = True,
+    reasoning_effort: Optional[str] = None
+) -> str:
+    """Run a conversation with streaming output and reasoning display.
+    
+    Args:
+        openai_client: The Azure OpenAI client
+        messages: The conversation messages
+        tool_to_server: Mapping of tool names to servers
+        all_tools: List of all available tools in OpenAI format
+        deployment: The model deployment name
+        max_iterations: Maximum tool call iterations
+        verbose: Whether to print verbose output
+        show_reasoning: Whether to display reasoning content
+        reasoning_effort: Reasoning effort level ("low", "medium", "high")
+    
+    Returns:
+        The final assistant response
+    """
+    iteration = 0
+    final_response = ""
+    
+    while iteration < max_iterations:
+        iteration += 1
+        
+        if verbose:
+            print(f"\n--- Iteration {iteration} ---")
+        
+        # Build request parameters
+        request_params = {
+            "model": deployment,
+            "messages": messages,
+            "stream": True
+        }
+        
+        if all_tools:
+            request_params["tools"] = all_tools
+            request_params["tool_choice"] = "auto"
+        
+        # Add reasoning effort if specified (for o1/o3/o4 models)
+        if reasoning_effort:
+            request_params["reasoning_effort"] = reasoning_effort
+        
+        try:
+            if verbose:
+                print(f"[DEBUG] Request params: model={deployment}, stream=True, tools={len(all_tools)} tools")
+            stream = openai_client.chat.completions.create(**request_params)
+        except Exception as e:
+            print(f"\n[ERROR] OpenAI API error: {str(e)}")
+            return f"OpenAI API error: {str(e)}"
+        
+        # Collect streamed content
+        collected_content = ""
+        collected_reasoning = ""
+        tool_calls_data = {}  # {index: {id, name, arguments}}
+        current_reasoning_shown = False
+        current_content_started = False
+        
+        first_chunk_logged = False
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+                
+            delta = chunk.choices[0].delta
+            
+            # Debug: Log first chunk structure when verbose
+            if verbose and not first_chunk_logged:
+                attrs = [a for a in dir(delta) if not a.startswith('_')]
+                print(f"\n[DEBUG] Delta attrs: {attrs}")
+                first_chunk_logged = True
+            
+            # Handle reasoning content (for reasoning models)
+            reasoning_text = getattr(delta, 'reasoning_content', None)
+            if reasoning_text:
+                if show_reasoning:
+                    if not current_reasoning_shown:
+                        print("\n💭 Reasoning: ", end="", flush=True)
+                        current_reasoning_shown = True
+                    print(delta.reasoning_content, end="", flush=True)
+                collected_reasoning += delta.reasoning_content
+            
+            # Handle regular content
+            if delta.content:
+                if current_reasoning_shown and not current_content_started:
+                    print("\n\n📝 Response: ", end="", flush=True)
+                    current_content_started = True
+                elif not current_content_started:
+                    print("\nAssistant: ", end="", flush=True)
+                    current_content_started = True
+                print(delta.content, end="", flush=True)
+                collected_content += delta.content
+            
+            # Handle tool calls
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_data:
+                        tool_calls_data[idx] = {"id": "", "name": "", "arguments": ""}
+                    
+                    if tc.id:
+                        tool_calls_data[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_data[idx]["name"] = tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_data[idx]["arguments"] += tc.function.arguments
+        
+        # End the streaming output line
+        if current_content_started or current_reasoning_shown:
+            print()  # New line after streaming
+        
+        # Check if we have tool calls to process
+        if tool_calls_data:
+            # Build tool calls list
+            tool_calls = []
+            for idx in sorted(tool_calls_data.keys()):
+                tc_data = tool_calls_data[idx]
+                tool_calls.append({
+                    "id": tc_data["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc_data["name"],
+                        "arguments": tc_data["arguments"]
+                    }
+                })
+            
+            # Add assistant message with tool calls to history
+            assistant_msg = {
+                "role": "assistant",
+                "content": collected_content if collected_content else None,
+                "tool_calls": tool_calls
+            }
+            messages.append(assistant_msg)
+            
+            # Execute each tool call
+            for tc in tool_calls:
+                tool_name = tc["function"]["name"]
+                try:
+                    arguments = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError:
+                    arguments = {}
+                
+                if verbose or True:  # Always show tool calls in chat
+                    print(f"\n🔧 Calling tool: {tool_name}")
+                    if verbose:
+                        print(f"   Arguments: {json.dumps(arguments, indent=2)}")
+                
+                # Call the tool
+                server = tool_to_server.get(tool_name)
+                if server:
+                    tool_result = await call_tool(server, tool_name, arguments)
+                else:
+                    tool_result = f"Error: Unknown tool '{tool_name}'"
+                
+                if verbose:
+                    result_preview = tool_result[:200] + "..." if len(tool_result) > 200 else tool_result
+                    print(f"   Result: {result_preview}")
+                
+                # Add tool result to messages
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": tool_result
+                })
+            
+            print()  # Blank line before next response
+        else:
+            # No tool calls - we have our final response
+            final_response = collected_content
+            break
+    
+    if not final_response and iteration >= max_iterations:
+        final_response = "Maximum iterations reached without a final response."
+        print(f"\n{final_response}")
+    
+    return final_response
+
+
 async def run_conversation(
     openai_client: AzureOpenAI,
     messages: list[dict],
-    tool_servers: list[ToolServer],
     tool_to_server: dict[str, ToolServer],
     all_tools: list[dict],
     deployment: str,
     max_iterations: int,
     verbose: bool = False
 ) -> str:
-    """Run a single conversation turn with the model."""
+    """Run a single conversation turn with the model (non-streaming)."""
     iteration = 0
     final_response = ""
     
@@ -351,7 +541,7 @@ async def run_playground(config: PlaygroundConfig) -> str:
     if not config.tools:
         # No tools - just call the model directly
         return await run_conversation(
-            openai_client, messages, [], {}, [], deployment, config.max_iterations, config.verbose
+            openai_client, messages, {}, [], deployment, config.max_iterations, config.verbose
         )
     
     # Connect to tool servers using nested context managers
@@ -369,7 +559,7 @@ async def run_playground(config: PlaygroundConfig) -> str:
         if index >= len(tool_paths):
             # All tools connected, run the conversation
             return await run_conversation(
-                openai_client, messages, servers, tool_map, all_tools,
+                openai_client, messages, tool_map, all_tools,
                 deployment, config.max_iterations, config.verbose
             )
         
@@ -409,6 +599,16 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
         """The main chat loop."""
         nonlocal messages
         
+        # Show streaming/reasoning status
+        if config.stream:
+            status_parts = ["Streaming enabled"]
+            if config.show_reasoning:
+                status_parts.append("reasoning display on")
+            if config.reasoning_effort:
+                status_parts.append(f"reasoning effort: {config.reasoning_effort}")
+            print(f"[{', '.join(status_parts)}]")
+        print("Type 'exit' or 'quit' to end, 'clear' to reset conversation.\n")
+        
         while True:
             # Get user input
             try:
@@ -437,16 +637,24 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
             # Add user message
             messages.append({"role": "user", "content": user_input})
             
-            # Run conversation
-            response = await run_conversation(
-                openai_client, messages, servers, tool_map, all_tools,
-                deployment, config.max_iterations, config.verbose
-            )
-            
-            # Add assistant response to history
-            messages.append({"role": "assistant", "content": response})
-            
-            print(f"\nAssistant: {response}\n")
+            # Run conversation (streaming or non-streaming)
+            if config.stream:
+                response = await run_conversation_streaming(
+                    openai_client, messages, tool_map, all_tools,
+                    deployment, config.max_iterations, config.verbose,
+                    config.show_reasoning, config.reasoning_effort
+                )
+                # Add assistant response to history (streaming already printed it)
+                messages.append({"role": "assistant", "content": response})
+                print()  # Extra newline for spacing
+            else:
+                response = await run_conversation(
+                    openai_client, messages, tool_map, all_tools,
+                    deployment, config.max_iterations, config.verbose
+                )
+                # Add assistant response to history
+                messages.append({"role": "assistant", "content": response})
+                print(f"\nAssistant: {response}\n")
     
     if not config.tools:
         # No tools - just run the chat loop
