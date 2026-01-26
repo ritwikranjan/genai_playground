@@ -169,7 +169,6 @@ python src/playground.py init-config -o my_config.json
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-
 | `system_prompt` | string | "You are a helpful assistant." | The system prompt for the conversation |
 | `user_prompt` | string | "" | The initial user prompt (for single-shot mode) |
 | `model` | string | "gpt-4o" | The model name |
@@ -354,7 +353,6 @@ You can use any MCP server published to PyPI:
 
 | Approach | When to Use | Example |
 |----------|-------------|---------|
-
 | **Built-in tools** | Quick start, common use cases | `tools/web_search.py` |
 | **Custom MCP server** | Internal APIs, proprietary data, custom logic | `tools/adx_kusto.py` |
 | **Pre-built via uvx** | Community tools, standard integrations | `uvx azure-kusto-mcp` |
@@ -525,7 +523,6 @@ python src/playground.py chat --config examples/adx_query.json --v2 -v
 
 | Option | Description |
 |--------|-------------|
-
 | `--v2` | Enable GitHub Copilot SDK mode |
 | `--reasoning`, `-r` | Show the AI's reasoning/thinking process (V2 only) |
 
@@ -556,7 +553,6 @@ The SDK manages:
 
 | Feature | V1 (Default) | V2 (Copilot SDK) |
 |---------|--------------|------------------|
-
 | Backend | Azure OpenAI | GitHub Copilot |
 | Auth | Azure API Key | GitHub Account |
 | Tool Orchestration | Manual loop | Automatic |
