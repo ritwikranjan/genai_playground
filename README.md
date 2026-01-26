@@ -1,6 +1,11 @@
 # GenAI Playground
 
-A Python CLI for experimenting with AI models and MCP (Model Context Protocol) tools using Azure OpenAI.
+A Python CLI for experimenting with AI models and MCP (Model Context Protocol) tools.
+
+Supports two operational modes:
+
+- **V1 (Default)**: Direct Azure OpenAI + MCP integration
+- **V2**: GitHub Copilot SDK-powered agent orchestration
 
 ## Features
 
@@ -19,7 +24,8 @@ A Python CLI for experimenting with AI models and MCP (Model Context Protocol) t
 genai_playground/
 ├── src/
 │   ├── playground.py       # CLI entry point
-│   └── client.py           # Core orchestration logic
+│   ├── client.py           # V1: Azure OpenAI + MCP orchestration
+│   └── client_v2.py        # V2: GitHub Copilot SDK integration
 ├── tools/
 │   ├── web_search.py       # Web search MCP server
 │   └── adx_kusto.py        # Azure Data Explorer MCP server
@@ -465,6 +471,122 @@ Iteration 2: Model receives results → Calls more tools OR provides final respo
 - Use specific, detailed prompts
 - In system prompt, instruct the model to "make 1-2 searches maximum then provide answer"
 - Set appropriate `max_iterations` (default: 10)
+
+## V2 Mode: GitHub Copilot SDK
+
+The playground includes an alternative execution mode powered by the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). This mode uses the same production-tested agent runtime behind GitHub Copilot CLI, providing:
+
+- **Agentic Workflows**: Copilot handles planning, tool invocation, and orchestration
+- **Native MCP Support**: Pass MCP servers directly to sessions without manual orchestration
+- **Streaming with Reasoning**: Real-time response streaming with optional reasoning display
+- **Simplified Integration**: No need to manage tool call loops manually
+
+### Prerequisites for V2 Mode
+
+1. **GitHub Copilot Subscription**: A GitHub Copilot subscription is required. See [GitHub Copilot pricing](https://github.com/features/copilot#pricing).
+
+2. **Copilot CLI**: Install the GitHub Copilot CLI and ensure `copilot` is available in your PATH. Follow the [Copilot CLI installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli).
+
+3. **GitHub Copilot SDK**: Install the Python SDK:
+
+   ```bash
+   pip install github-copilot-sdk
+   ```
+
+4. **Authentication**: Authenticate with your GitHub account:
+
+   Execute copilot
+
+   ```bash
+   copilot
+   ```
+
+   Run `/login` in the prompt window and use your github account to authenticate.
+
+### Using V2 Mode
+
+Add the `--v2` flag to any command to use the Copilot SDK:
+
+```bash
+# Single prompt with V2
+python src/playground.py run -p "What are the latest AI news?" -t tools/web_search.py --v2
+
+# Interactive chat with V2
+python src/playground.py chat -t tools/web_search.py --v2
+
+# Chat with reasoning display
+python src/playground.py chat -t tools/web_search.py --v2 --reasoning
+
+# With config file
+python src/playground.py chat --config examples/adx_query.json --v2 -v
+```
+
+### V2-Specific Options
+
+| Option | Description |
+|--------|-------------|
+
+| `--v2` | Enable GitHub Copilot SDK mode |
+| `--reasoning`, `-r` | Show the AI's reasoning/thinking process (V2 only) |
+
+### How V2 Works
+
+The V2 client (`src/client_v2.py`) wraps the GitHub Copilot SDK:
+
+```text
+Your Prompt
+    ↓
+CopilotClient (SDK)
+    ↓ JSON-RPC
+Copilot CLI (server mode)
+    ↓
+GitHub Copilot API
+    ↓
+MCP Tool Servers (if configured)
+```
+
+The SDK manages:
+
+- Session lifecycle and state
+- Tool discovery and invocation
+- Response streaming and events
+- Context compaction for long sessions
+
+### V2 vs V1 Comparison
+
+| Feature | V1 (Default) | V2 (Copilot SDK) |
+|---------|--------------|------------------|
+
+| Backend | Azure OpenAI | GitHub Copilot |
+| Auth | Azure API Key | GitHub Account |
+| Tool Orchestration | Manual loop | Automatic |
+| Reasoning Display | Model-dependent | Built-in support |
+| Billing | Azure consumption | Copilot subscription |
+
+### Example: V2 with Custom MCP Tools
+
+```json
+{
+  "system_prompt": "You are a data analyst assistant.",
+  "tools": [
+    {
+      "name": "adx-kusto",
+      "command": "python",
+      "args": ["tools/adx_kusto.py"],
+      "tools_filter": ["*"]
+    }
+  ],
+  "verbose": true,
+  "stream": true,
+  "show_reasoning": true
+}
+```
+
+Run with:
+
+```bash
+python src/playground.py chat --config examples/adx_query.json --v2
+```
 
 ## License
 

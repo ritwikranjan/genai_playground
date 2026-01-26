@@ -21,7 +21,7 @@ from rich.markdown import Markdown
 # Add the src directory to the path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from client import PlaygroundConfig, run_playground
+from client import PlaygroundConfig, run_playground as run_playground_v1
 
 app = typer.Typer(
     name="genai-playground",
@@ -124,6 +124,13 @@ def run(
         False,
         "--raw",
         help="Output raw text without formatting."
+    ),
+    
+    # V2 SDK option
+    use_v2: bool = typer.Option(
+        False,
+        "--v2",
+        help="Use the GitHub Copilot SDK (v2) instead of direct MCP/OpenAI integration."
     )
 ):
     """
@@ -208,6 +215,15 @@ def run(
             title="Configuration",
             border_style="blue"
         ))
+    
+    # Select the appropriate runner based on v2 flag
+    if use_v2:
+        from client_v2 import run_playground as run_playground_v2
+        run_playground = run_playground_v2
+        if verbose:
+            console.print("[dim]Using Copilot SDK (v2)[/dim]")
+    else:
+        run_playground = run_playground_v1
     
     # Run the playground
     try:
@@ -356,6 +372,20 @@ def chat(
         "--azure-deployment",
         envvar="AZURE_OPENAI_DEPLOYMENT",
         help="Azure OpenAI deployment name."
+    ),
+    
+    # V2 SDK option
+    use_v2: bool = typer.Option(
+        False,
+        "--v2",
+        help="Use the GitHub Copilot SDK (v2) instead of direct MCP/OpenAI integration."
+    ),
+    
+    # Show reasoning (for v2)
+    show_reasoning: bool = typer.Option(
+        False,
+        "--reasoning", "-r",
+        help="Show the AI's reasoning/thinking process (v2 only)."
     )
 ):
     """
@@ -375,7 +405,7 @@ def chat(
         # Verbose mode to see tool calls
         python playground.py chat -t tools/web_search.py -v
     """
-    from client import PlaygroundConfig, run_chat_session
+    from client import PlaygroundConfig, run_chat_session as run_chat_session_v1
     
     # Build config
     config_dict = {
@@ -411,6 +441,8 @@ def chat(
         config_dict["max_iterations"] = max_iterations
     if verbose:
         config_dict["verbose"] = verbose
+    if show_reasoning:
+        config_dict["show_reasoning"] = show_reasoning
     
     # Azure settings
     if azure_endpoint:
@@ -437,6 +469,15 @@ def chat(
         border_style="blue"
     ))
     console.print("[dim]Type 'exit' or 'quit' to end the session. Type 'clear' to reset conversation.[/dim]\n")
+    
+    # Select the appropriate runner based on v2 flag
+    if use_v2:
+        from client_v2 import run_chat_session as run_chat_session_v2
+        run_chat_session = run_chat_session_v2
+        if verbose:
+            console.print("[dim]Using Copilot SDK (v2)[/dim]")
+    else:
+        run_chat_session = run_chat_session_v1
     
     try:
         playground_config = PlaygroundConfig.from_dict(config_dict)

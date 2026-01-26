@@ -4,14 +4,16 @@
   "model": "gpt-5",
   "tools": [
     {
-      "name": "azure-kusto-mcp",
-      "command": "uvx",
-      "args": ["azure-kusto-mcp"],
-      "env": {
-        "KUSTO_SERVICE_URI": "<Your Kusto cluster URI>"
-      }
+      "name": "azure-mcp",
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "env": {},
+      "tools_filter": ["kusto"]
     }
   ],
   "max_iterations": 10,
-  "verbose": true
+  "verbose": true,
+  "stream": true,
+  "show_reasoning": true,
+  "reasoning_effort": "high"
 }
