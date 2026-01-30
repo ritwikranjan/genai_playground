@@ -281,17 +281,16 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
             
             if config.verbose:
                 # Show tool parameters in verbose mode
-                tool_params = getattr(event_data, 'parameters', None) or getattr(event_data, 'arguments', None) or getattr(event_data, 'input', None)
+                tool_params = getattr(event_data, 'arguments', None)
+                tool_input = getattr(event_data, 'input', None)
+                if tool_input:
+                    print(f"   📥 Input: {tool_input}")
                 if tool_params:
                     if isinstance(tool_params, dict):
                         params_str = json.dumps(tool_params, indent=2, default=str)
                     else:
                         params_str = str(tool_params)
                     print(f"   📋 Parameters: {params_str}")
-                
-                # Log all available attributes to help debug
-                all_attrs = [a for a in dir(event_data) if not a.startswith('_')]
-                print(f"   [DEBUG] Event data attrs: {all_attrs}")
         
         elif event.type == SessionEventType.TOOL_EXECUTION_COMPLETE:
             # Always show tool completion to verify actual execution
@@ -306,10 +305,6 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
                     print(f"   📤 Result: {result_str}")
                 else:
                     print("   ⚠️ No result returned from tool")
-                
-                # Log all available attributes to help debug
-                all_attrs = [a for a in dir(event_data) if not a.startswith('_')]
-                print(f"   [DEBUG] Event data attrs: {all_attrs}")
         
         # Session idle - end of turn
         elif event.type == SessionEventType.SESSION_IDLE:
@@ -366,12 +361,12 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
                 is_streaming_response = False
                 is_streaming_reasoning = False
                 
-                # Send with extended timeout (5 minutes for complex queries)
+                # Send with extended timeout (1 hour for complex queries)
                 await session.send_and_wait({
                     "prompt": user_input,
                     "mode": "agent",
                     "attachments": []
-                }, timeout=300)
+                }, timeout=3600)
                 
                 # Ensure final newline after response completes
                 print()

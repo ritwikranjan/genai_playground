@@ -18,7 +18,6 @@ Authentication is handled via Azure Identity (DefaultAzureCredential).
 
 import asyncio
 import json
-import os
 from typing import Any
 
 from mcp.server import Server

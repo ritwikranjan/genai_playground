@@ -7,13 +7,12 @@ This module handles the core logic for:
 - Orchestrating the tool execution loop
 """
 
-import asyncio
 import json
 import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator
 
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
