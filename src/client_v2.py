@@ -12,11 +12,16 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
 
 # Import the PlaygroundConfig from client.py to ensure compatibility
 from client import PlaygroundConfig
+
+# Import the Audit System
+from audit import AuditManager
+from audit.models import SessionStatus
 
 # Import the Copilot SDK
 try:
@@ -183,7 +188,7 @@ async def run_playground(config: PlaygroundConfig) -> str:
         await client.stop()
 
 
-async def run_chat_session(config: PlaygroundConfig, on_message: callable = None):
+async def run_chat_session(config: PlaygroundConfig, on_message: callable = None, enable_audit: bool = True):
     """
     Run an interactive chat session using Copilot SDK.
     
@@ -192,6 +197,7 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
     Args:
         config: The playground configuration
         on_message: Optional callback for handling messages (for testing)
+        enable_audit: Whether to enable audit logging to Cosmos DB (default: True)
     """
     # Build MCP servers config - passed directly to session, not written to ~/.copilot/
     if config.verbose:
@@ -200,15 +206,36 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
     
     console.print("🤖 Initializing Copilot Agent...")
     
+    # Initialize Audit System
+    audit: Optional[AuditManager] = None
+    if enable_audit:
+        try:
+            audit = AuditManager()
+            audit.initialize()
+            # Start audit session with agent config
+            agent_config = {
+                "mcp_servers": list(mcp_servers.keys()),
+                "streaming": config.stream,
+                "system_prompt_length": len(config.system_prompt) if config.system_prompt else 0,
+            }
+            audit.start_session(agent_config=agent_config)
+            console.print("📊 Audit logging enabled.")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Audit initialization failed: {e}. Continuing without audit.[/yellow]")
+            audit = None
+    
     # Initialize the Copilot Client
     client_options = {
+        "cli_url": "http://localhost:3001",  # Use copilot in server mode with CLI URL
         "log_level": "error"  # Suppress verbose CLI logging
     }
     
     client = CopilotClient(client_options)
     
     # Start the client
+    print("🚀 Starting Copilot Client...")
     await client.start()
+    print("✅ Copilot Client started.")
     
     # Create session with MCP servers passed directly (no file write needed)
     session_config = {
@@ -226,18 +253,25 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
     
     # Set up event handler with streaming for response and reasoning
     response_text = []
+    reasoning_text = []
     is_streaming_response = False
     is_streaming_reasoning = False
     
+    # Track tool executions for audit
+    pending_tool_ids: dict[str, str] = {}  # Maps tool_name -> audit_tool_id
+    
     def handle_event(event):
+        print("event: ", event.type) # Debug print
+        print("data: ", event.data) # Debug print
         nonlocal is_streaming_response, is_streaming_reasoning
         event_data = event.data
         
         # Streaming reasoning delta
         if event.type == SessionEventType.ASSISTANT_REASONING_DELTA:
-            if config.show_reasoning:
-                delta = getattr(event_data, 'delta_content', '') if event_data else ''
-                if delta:
+            delta = getattr(event_data, 'delta_content', '') if event_data else ''
+            if delta:
+                reasoning_text.append(delta)
+                if config.show_reasoning:
                     if not is_streaming_reasoning:
                         print("\n💭 ", end="", flush=True)
                         is_streaming_reasoning = True
@@ -279,10 +313,34 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
             # Always show tool execution to verify it's actually happening
             print(f"\n🔧 [TOOL CALL] {tool_name}")
             
+            # Get tool arguments for audit
+            tool_params = getattr(event_data, 'arguments', None)
+            tool_input = getattr(event_data, 'input', None)
+            
+            # Log tool start to audit
+            if audit:
+                try:
+                    # Combine arguments and input into a single dict for audit
+                    audit_args = {}
+                    if tool_params:
+                        if isinstance(tool_params, dict):
+                            audit_args.update(tool_params)
+                        else:
+                            audit_args["arguments"] = tool_params
+                    if tool_input:
+                        audit_args["input"] = tool_input
+                    
+                    audit_tool_id = audit.log_tool_start(
+                        tool_name=tool_name,
+                        arguments=audit_args if audit_args else None
+                    )
+                    pending_tool_ids[tool_name] = audit_tool_id
+                except Exception as e:
+                    if config.verbose:
+                        console.print(f"[dim]Audit tool start failed: {e}[/dim]")
+            
             if config.verbose:
                 # Show tool parameters in verbose mode
-                tool_params = getattr(event_data, 'arguments', None)
-                tool_input = getattr(event_data, 'input', None)
                 if tool_input:
                     print(f"   📥 Input: {tool_input}")
                 if tool_params:
@@ -295,9 +353,50 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
         elif event.type == SessionEventType.TOOL_EXECUTION_COMPLETE:
             # Always show tool completion to verify actual execution
             print(f"   ✅ [TOOL COMPLETE]")
+            
+            # Get tool name for audit lookup
+            tool_name = getattr(event_data, 'tool_name', 'unknown') if event_data else 'unknown'
+            
+            # Get the result - SDK returns a Result object with a 'content' field
+            result = None
+            if event_data:
+                # The SDK's Data class has 'result' as Optional[Result] where Result has 'content: str'
+                result_obj = getattr(event_data, 'result', None)
+                if result_obj is not None:
+                    # Result is a dataclass with a 'content' field
+                    # Try to access content directly
+                    if hasattr(result_obj, 'content'):
+                        result = result_obj.content
+                    else:
+                        # Fallback: if it's a dict-like object
+                        result = result_obj.get('content') if hasattr(result_obj, 'get') else str(result_obj)
+                    if config.verbose:
+                        console.print(f"[dim]   Got result from result.content (type: {type(result_obj).__name__})[/dim]")
+                
+                # Fallback: try 'output' which is also in the Data class
+                if result is None:
+                    result = getattr(event_data, 'output', None)
+                    if result is not None and config.verbose:
+                        console.print(f"[dim]   Got result from output[/dim]")
+            
+            # Log tool completion to audit
+            if audit and tool_name in pending_tool_ids:
+                try:
+                    audit_tool_id = pending_tool_ids.pop(tool_name)
+                    # Truncate large results for storage
+                    result_for_audit = result
+                    if result and len(str(result)) > 10000:
+                        result_for_audit = str(result)[:10000] + "...[truncated]"
+                    audit.log_tool_complete(
+                        tool_id=audit_tool_id,
+                        result=result_for_audit
+                    )
+                except Exception as e:
+                    if config.verbose:
+                        console.print(f"[dim]Audit tool complete failed: {e}[/dim]")
+            
             if config.verbose:
                 # Show tool result in verbose mode
-                result = getattr(event_data, 'result', None)
                 if result:
                     result_str = str(result)[:500]  # Truncate long results
                     if len(str(result)) > 500:
@@ -326,6 +425,8 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
         console.print("✅ Connected. Copilot SDK v2 enabled.")
         if config.show_reasoning:
             console.print("   (Reasoning display on)")
+        if audit:
+            console.print(f"   📊 Session ID: {audit.session_id}")
         console.print("   Type 'exit' or 'quit' to end, 'clear' to reset session.\n")
         
         while True:
@@ -352,14 +453,25 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
                 session = await client.create_session(session_config)
                 session.on(handle_event)
                 response_text.clear()
+                reasoning_text.clear()
+                pending_tool_ids.clear()
                 console.print("Session reset.\n")
                 continue
             
             try:
-                # Clear response text for new message
+                # Clear response/reasoning text for new message
                 response_text.clear()
+                reasoning_text.clear()
                 is_streaming_response = False
                 is_streaming_reasoning = False
+                
+                # Start audit interaction
+                if audit:
+                    try:
+                        audit.start_interaction(user_query=user_input)
+                    except Exception as e:
+                        if config.verbose:
+                            console.print(f"[dim]Audit interaction start failed: {e}[/dim]")
                 
                 # Send with extended timeout (1 hour for complex queries)
                 await session.send_and_wait({
@@ -368,14 +480,44 @@ async def run_chat_session(config: PlaygroundConfig, on_message: callable = None
                     "attachments": []
                 }, timeout=3600)
                 
+                # Complete audit interaction with response
+                if audit:
+                    try:
+                        full_response = "".join(response_text) if response_text else None
+                        full_reasoning = "".join(reasoning_text) if reasoning_text else None
+                        audit.complete_interaction(
+                            copilot_response=full_response,
+                            reasoning=full_reasoning
+                        )
+                    except Exception as e:
+                        if config.verbose:
+                            console.print(f"[dim]Audit interaction complete failed: {e}[/dim]")
+                
                 # Ensure final newline after response completes
                 print()
                 
             except Exception as e:
                 console.print(f"[red]❌ Error: {e}[/red]\n")
+                # Log error to audit if we have an active interaction
+                if audit:
+                    try:
+                        audit.complete_interaction(
+                            copilot_response=f"[Error: {str(e)}]",
+                            reasoning="".join(reasoning_text) if reasoning_text else None
+                        )
+                    except Exception:
+                        pass
         
         # Clean up session
         await session.destroy()
         
     finally:
+        # End audit session
+        if audit:
+            try:
+                audit.end_session(status=SessionStatus.COMPLETED)
+                console.print(f"📊 Audit session completed: {audit.session_id}")
+            except Exception as e:
+                console.print(f"[yellow]⚠️ Audit session end failed: {e}[/yellow]")
+        
         await client.stop()
